@@ -1,13 +1,14 @@
-FROM node:18-alpine
+FROM node:20-alpine
 
 RUN apk add --no-cache \
     ffmpeg \
     python3 \
-    py3-pip
+    py3-pip \
+    git
 
 RUN pip3 install yt-dlp --break-system-packages
 
-RUN npm install -g n8n@1.94.1
+RUN npm install -g n8n@1.68.0
 
 ENV N8N_DEFAULT_BINARY_DATA_MODE=filesystem
 ENV EXECUTIONS_DATA_PRUNE=true
@@ -19,6 +20,7 @@ EXPOSE 5678
 
 ENTRYPOINT ["n8n"]
 CMD ["start"]
+
 
 
 
