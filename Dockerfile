@@ -1,25 +1,18 @@
-FROM node:20-alpine
+FROM n8nio/n8n:latest
 
-RUN apk add --no-cache \
-    ffmpeg \
-    python3 \
-    py3-pip \
-    git
+USER root
 
-RUN pip3 install yt-dlp --break-system-packages
+RUN apk add --no-cache ffmpeg python3 py3-pip \
+    && pip3 install yt-dlp --break-system-packages \
+    && apk info n8n 2>/dev/null || true
 
-RUN npm install -g n8n@latest
+USER node
 
 ENV N8N_DEFAULT_BINARY_DATA_MODE=filesystem
 ENV EXECUTIONS_DATA_PRUNE=true
 ENV EXECUTIONS_DATA_MAX_AGE=1
 ENV N8N_PAYLOAD_SIZE_MAX=16
-ENV N8N_PORT=5678
 
-EXPOSE 5678
-
-ENTRYPOINT ["n8n"]
-CMD ["start"]
 
 
 
