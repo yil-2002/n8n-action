@@ -8,7 +8,7 @@ RUN apk add --no-cache \
 
 RUN pip3 install yt-dlp --break-system-packages
 
-RUN npm install -g n8n@1.121.0
+RUN npm install -g n8n@latest
 
 ENV N8N_DEFAULT_BINARY_DATA_MODE=filesystem
 ENV EXECUTIONS_DATA_PRUNE=true
@@ -20,6 +20,7 @@ EXPOSE 5678
 
 ENTRYPOINT ["n8n"]
 CMD ["start"]
+
 
 
 
