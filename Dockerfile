@@ -2,16 +2,13 @@ FROM n8nio/n8n:latest
 
 USER root
 
-RUN apk add --no-cache \
+RUN apt-get update && apt-get install -y \
     ffmpeg \
-    yt-dlp \
     python3 \
-    py3-pip
-
-ENV NODE_OPTIONS=--max-old-space-size=400
-ENV N8N_DEFAULT_BINARY_DATA_MODE=filesystem
-ENV EXECUTIONS_DATA_PRUNE=true
-ENV EXECUTIONS_DATA_MAX_AGE=1
-ENV N8N_PAYLOAD_SIZE_MAX=16
+    python3-pip \
+    && pip3 install yt-dlp --break-system-packages \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
 USER node
+
