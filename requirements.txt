@@ -1,0 +1,5 @@
+aiogram==3.13.0
+shazamio==0.4.0
+yt-dlp==2024.12.13
+python-dotenv==1.0.1
+aiofiles==24.1.0
