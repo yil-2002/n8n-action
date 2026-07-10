@@ -103,13 +103,75 @@ def is_youtube(url: str) -> bool:
 def is_instagram(url: str) -> bool:
     return "instagram.com" in url
 
+COOKIES_FILE = os.getenv("COOKIES_FILE", "/app/cookies.txt")
+
+# Invidious public instancelar (YouTube proxy)
+INVIDIOUS_INSTANCES = [
+    "https://invidious.nerdvpn.de",
+    "https://inv.nadeko.net",
+    "https://invidious.privacyredirect.com",
+    "https://yt.cdaut.de",
+]
+
+def get_youtube_id(url: str) -> str | None:
+    """YouTube URL dan video ID olish"""
+    patterns = [
+        r"youtu\.be/([a-zA-Z0-9_-]{11})",
+        r"youtube\.com/watch\?v=([a-zA-Z0-9_-]{11})",
+        r"youtube\.com/shorts/([a-zA-Z0-9_-]{11})",
+        r"youtube\.com/embed/([a-zA-Z0-9_-]{11})",
+    ]
+    for p in patterns:
+        m = re.search(p, url)
+        if m:
+            return m.group(1)
+    return None
+
+
+async def get_invidious_stream(video_id: str) -> tuple[str, str, str, int] | None:
+    """Invidious API orqali stream URL olish — (stream_url, title, author, duration)"""
+    import aiohttp as _aiohttp
+    for instance in INVIDIOUS_INSTANCES:
+        try:
+            api_url = f"{instance}/api/v1/videos/{video_id}"
+            async with _aiohttp.ClientSession(timeout=_aiohttp.ClientTimeout(total=10)) as sess:
+                async with sess.get(api_url) as resp:
+                    if resp.status != 200:
+                        continue
+                    data = await resp.json()
+
+            title    = data.get("title", "Video")
+            author   = data.get("author", "")
+            duration = data.get("lengthSeconds", 0)
+
+            # Eng yaxshi mp4 stream tanlash (360p yoki 720p)
+            formats = data.get("formatStreams", [])
+            chosen  = None
+            for q in ["720p", "480p", "360p", "240p"]:
+                for f in formats:
+                    if f.get("quality") == q and f.get("container") == "mp4":
+                        chosen = f
+                        break
+                if chosen:
+                    break
+            if not chosen and formats:
+                chosen = formats[-1]
+
+            if chosen:
+                stream_url = chosen.get("url", "")
+                if stream_url:
+                    return stream_url, title, author, duration
+        except Exception:
+            continue
+    return None
+
+
 def base_ydl_opts(url: str) -> dict:
     """Har bir platforma uchun umumiy yt-dlp sozlamalar"""
     opts = {
         "quiet": True,
         "no_warnings": True,
         "socket_timeout": 30,
-        # Bot detection bypass
         "http_headers": {
             "User-Agent": (
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -120,20 +182,11 @@ def base_ydl_opts(url: str) -> dict:
         },
     }
 
-    if is_youtube(url):
-        opts.update({
-            "extractor_args": {
-                "youtube": {
-                    "player_client": ["ios", "web_creator"],
-                    "skip": ["dash", "hls"],
-                }
-            },
-            "age_limit": 99,
-        })
+    if os.path.exists(COOKIES_FILE):
+        opts["cookiefile"] = COOKIES_FILE
 
     if is_instagram(url):
         opts.update({
-            # Instagram public video uchun
             "extractor_args": {
                 "instagram": {"include_ads": False}
             },
@@ -178,39 +231,53 @@ async def process_url(message: Message, url: str):
 
     tmp_dir  = tempfile.mkdtemp()
     vid_path = os.path.join(tmp_dir, "video.%(ext)s")
+    actual_file = None
+    title    = "Video"
+    duration = 0
 
     try:
-        loop = asyncio.get_event_loop()
-        info = await loop.run_in_executor(
-            None, download_video_sync, url, vid_path
-        )
+        # YouTube uchun avval Invidious sinab ko'r
+        if is_youtube(url):
+            video_id = get_youtube_id(url)
+            if video_id:
+                await status_msg.edit_text("⏳ <b>YouTube video yuklanmoqda...</b>")
+                invidious = await get_invidious_stream(video_id)
+                if invidious:
+                    stream_url, title, author, duration = invidious
+                    # Stream URL dan to'g'ridan yuklash
+                    out_file = os.path.join(tmp_dir, "video.mp4")
+                    import aiohttp as _aiohttp
+                    async with _aiohttp.ClientSession() as sess:
+                        async with sess.get(stream_url, timeout=_aiohttp.ClientTimeout(total=120)) as resp:
+                            if resp.status == 200:
+                                with open(out_file, "wb") as f:
+                                    async for chunk in resp.content.iter_chunked(1024 * 64):
+                                        f.write(chunk)
+                                actual_file = out_file
 
-        # Yuklangan faylni topish
-        actual_file = None
-        for f in os.listdir(tmp_dir):
-            full = os.path.join(tmp_dir, f)
-            if os.path.isfile(full):
-                actual_file = full
-                break
+        # Invidious ishlamasa yoki boshqa platform — yt-dlp
+        if not actual_file:
+            loop = asyncio.get_event_loop()
+            info = await loop.run_in_executor(
+                None, download_video_sync, url, vid_path
+            )
+            if info:
+                title    = info.get("title", "Video")
+                duration = info.get("duration", 0)
+            for f in os.listdir(tmp_dir):
+                full = os.path.join(tmp_dir, f)
+                if os.path.isfile(full) and not full.endswith(".part"):
+                    actual_file = full
+                    break
 
         if not actual_file:
             await status_msg.edit_text("❌ Video yuklab bo'lmadi.")
             return
 
         file_size = os.path.getsize(actual_file)
-        # Telegram 50MB limit
         if file_size > 50 * 1024 * 1024:
-            await status_msg.edit_text(
-                "❌ Video hajmi 50MB dan katta, yuborib bo'lmaydi."
-            )
+            await status_msg.edit_text("❌ Video hajmi 50MB dan katta, yuborib bo'lmaydi.")
             return
-
-        title    = info.get("title", "Video") if info else "Video"
-        duration = info.get("duration", 0) if info else 0
-
-        # Shazam uchun inline tugma
-        kb = InlineKeyboardMarkup()
-        kb.add(InlineKeyboardButton("🎵 Musiqa topish", callback_data=f"shazam_local:{actual_file}"))
 
         await status_msg.delete()
 
@@ -221,7 +288,6 @@ async def process_url(message: Message, url: str):
                 supports_streaming=True,
             )
 
-        # Shazam tugmasi alohida xabar sifatida
         shazam_kb = InlineKeyboardMarkup()
         shazam_kb.add(
             InlineKeyboardButton("🎵 Musiqani topish (Shazam)", callback_data=f"shazam_url:{url}")
@@ -259,26 +325,53 @@ async def process_url_audio_shazam(message: Message, url: str):
 
     tmp_dir  = tempfile.mkdtemp()
     aud_path = os.path.join(tmp_dir, "audio")
+    actual_file = None
+    info = None
 
     try:
-        loop = asyncio.get_event_loop()
-        info = await loop.run_in_executor(
-            None, download_audio_sync, url, aud_path
-        )
+        # YouTube uchun Invidious orqali video yuklab, ffmpeg bilan mp3 ga aylantir
+        if is_youtube(url):
+            video_id = get_youtube_id(url)
+            if video_id:
+                invidious = await get_invidious_stream(video_id)
+                if invidious:
+                    stream_url, yt_title, yt_author, yt_dur = invidious
+                    tmp_mp4 = os.path.join(tmp_dir, "video.mp4")
+                    tmp_mp3 = os.path.join(tmp_dir, "audio.mp3")
+                    import aiohttp as _aiohttp
+                    async with _aiohttp.ClientSession() as sess:
+                        async with sess.get(stream_url, timeout=_aiohttp.ClientTimeout(total=120)) as resp:
+                            if resp.status == 200:
+                                with open(tmp_mp4, "wb") as f:
+                                    async for chunk in resp.content.iter_chunked(1024 * 64):
+                                        f.write(chunk)
+                    # ffmpeg bilan mp3 ga aylantir
+                    import subprocess
+                    subprocess.run(
+                        ["ffmpeg", "-y", "-i", tmp_mp4, "-vn",
+                         "-acodec", "libmp3lame", "-q:a", "2", tmp_mp3],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                    )
+                    if os.path.exists(tmp_mp3):
+                        actual_file = tmp_mp3
+                        info = {"title": yt_title, "uploader": yt_author, "duration": yt_dur}
 
-        # mp3 faylni topish
-        actual_file = None
-        for f in os.listdir(tmp_dir):
-            if f.endswith(".mp3"):
-                actual_file = os.path.join(tmp_dir, f)
-                break
-
+        # Fallback: yt-dlp
         if not actual_file:
+            loop = asyncio.get_event_loop()
+            info = await loop.run_in_executor(
+                None, download_audio_sync, url, aud_path
+            )
             for f in os.listdir(tmp_dir):
-                full = os.path.join(tmp_dir, f)
-                if os.path.isfile(full):
-                    actual_file = full
+                if f.endswith(".mp3"):
+                    actual_file = os.path.join(tmp_dir, f)
                     break
+            if not actual_file:
+                for f in os.listdir(tmp_dir):
+                    full = os.path.join(tmp_dir, f)
+                    if os.path.isfile(full) and not full.endswith(".part"):
+                        actual_file = full
+                        break
 
         if not actual_file:
             await status_msg.edit_text("❌ Audio yuklab bo'lmadi.")
@@ -287,11 +380,10 @@ async def process_url_audio_shazam(message: Message, url: str):
         # Shazam bilan aniqlash
         shazam_result = await recognize_file(actual_file)
 
-        # Ijrochi va nom Shazam natijasidan olish
         title    = ""
         subtitle = ""
         try:
-            raw = await shazam.recognize(actual_file)
+            raw   = await shazam.recognize(actual_file)
             track = raw.get("track", {})
             title    = track.get("title", "")
             subtitle = track.get("subtitle", "")
@@ -306,10 +398,8 @@ async def process_url_audio_shazam(message: Message, url: str):
 
         await status_msg.delete()
 
-        # Shazam natijasini yubor
         await message.answer(shazam_result, disable_web_page_preview=False)
 
-        # mp3 faylni audio sifatida yubor (50MB limit)
         if file_size <= 50 * 1024 * 1024:
             with open(actual_file, "rb") as af:
                 await message.answer_audio(
