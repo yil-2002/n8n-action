@@ -122,13 +122,13 @@ def base_ydl_opts(url: str) -> dict:
 
     if is_youtube(url):
         opts.update({
-            # YouTube uchun android client — cookiesiz ishlaydi
             "extractor_args": {
                 "youtube": {
-                    "player_client": ["android"],
-                    "skip": ["webpage"],
+                    "player_client": ["ios", "web_creator"],
+                    "skip": ["dash", "hls"],
                 }
             },
+            "age_limit": 99,
         })
 
     if is_instagram(url):
