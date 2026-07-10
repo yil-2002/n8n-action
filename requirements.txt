@@ -1,6 +1,7 @@
 aiogram==2.23.1
-asyncpg
 aiohttp
+shazamio
+
 
 
 
