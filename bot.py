@@ -2,25 +2,36 @@ import os
 import asyncio
 import threading
 import tempfile
+import re
 from aiohttp import web
 from aiogram import Bot, Dispatcher, types
-from aiogram.types import Message, ContentType
+from aiogram.types import Message, ContentType, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils import executor
+from aiogram.dispatcher import FSMContext
+from aiogram.contrib.fsm_storage.memory import MemoryStorage
 from shazamio import Shazam
+import yt_dlp
 
 # ─── Config ───────────────────────────────────────────────────────────────────
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-PORT      = int(os.getenv("PORT", 8000))
+BOT_TOKEN   = os.getenv("BOT_TOKEN")
+BOT_USERNAME = os.getenv("BOT_USERNAME", "ovoz_media_bot")  # o'zingizning bot username
+PORT        = int(os.getenv("PORT", 8000))
 
 if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN environment variable is not set!")
 
 # ─── Bot ──────────────────────────────────────────────────────────────────────
 
-bot    = Bot(token=BOT_TOKEN, parse_mode="HTML")
-dp     = Dispatcher(bot)
-shazam = Shazam()
+bot     = Bot(token=BOT_TOKEN, parse_mode="HTML")
+storage = MemoryStorage()
+dp      = Dispatcher(bot, storage=storage)
+shazam  = Shazam()
+
+# URL pattern
+URL_PATTERN = re.compile(
+    r'https?://[^\s]+'
+)
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -85,18 +96,166 @@ async def download_and_recognize(message: Message, file_id: str, ext: str):
             except Exception:
                 pass
 
+
+def download_video_sync(url: str, output_path: str) -> dict:
+    """yt-dlp orqali video yuklash (sync, thread ichida)"""
+    ydl_opts = {
+        "outtmpl": output_path,
+        "format": "best[ext=mp4]/best",
+        "quiet": True,
+        "no_warnings": True,
+        "merge_output_format": "mp4",
+    }
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(url, download=True)
+        return info
+
+
+def download_audio_sync(url: str, output_path: str) -> dict:
+    """yt-dlp orqali faqat audio yuklash (sync, thread ichida)"""
+    ydl_opts = {
+        "outtmpl": output_path,
+        "format": "bestaudio/best",
+        "quiet": True,
+        "no_warnings": True,
+        "postprocessors": [{
+            "key": "FFmpegExtractAudio",
+            "preferredcodec": "mp3",
+            "preferredquality": "192",
+        }],
+    }
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(url, download=True)
+        return info
+
+
+async def process_url(message: Message, url: str):
+    """URL dan video yuklab, Telegram ga yuborish"""
+    status_msg = await message.answer("⏳ <b>Video yuklanmoqda...</b>")
+
+    tmp_dir  = tempfile.mkdtemp()
+    vid_path = os.path.join(tmp_dir, "video.%(ext)s")
+
+    try:
+        loop = asyncio.get_event_loop()
+        info = await loop.run_in_executor(
+            None, download_video_sync, url, vid_path
+        )
+
+        # Yuklangan faylni topish
+        actual_file = None
+        for f in os.listdir(tmp_dir):
+            full = os.path.join(tmp_dir, f)
+            if os.path.isfile(full):
+                actual_file = full
+                break
+
+        if not actual_file:
+            await status_msg.edit_text("❌ Video yuklab bo'lmadi.")
+            return
+
+        file_size = os.path.getsize(actual_file)
+        # Telegram 50MB limit
+        if file_size > 50 * 1024 * 1024:
+            await status_msg.edit_text(
+                "❌ Video hajmi 50MB dan katta, yuborib bo'lmaydi."
+            )
+            return
+
+        title    = info.get("title", "Video") if info else "Video"
+        duration = info.get("duration", 0) if info else 0
+
+        # Shazam uchun inline tugma
+        kb = InlineKeyboardMarkup()
+        kb.add(InlineKeyboardButton("🎵 Musiqa topish", callback_data=f"shazam_local:{actual_file}"))
+
+        await status_msg.delete()
+
+        with open(actual_file, "rb") as vf:
+            await message.answer_video(
+                vf,
+                caption=f"❤️ @{BOT_USERNAME} orqali yuklab olindi 🚀📥",
+                supports_streaming=True,
+            )
+
+        # Shazam tugmasi alohida xabar sifatida
+        shazam_kb = InlineKeyboardMarkup()
+        shazam_kb.add(
+            InlineKeyboardButton("🎵 Musiqani topish (Shazam)", callback_data=f"shazam_url:{url}")
+        )
+        await message.answer("👇 Videodagi musiqani topish uchun:", reply_markup=shazam_kb)
+
+    except yt_dlp.utils.DownloadError as e:
+        await status_msg.edit_text(f"❌ Yuklab bo'lmadi: {str(e)[:200]}")
+    except Exception as e:
+        await status_msg.edit_text(f"❌ Xatolik: {str(e)[:200]}")
+    finally:
+        # Temp fayllarni tozalash
+        import shutil
+        try:
+            shutil.rmtree(tmp_dir)
+        except Exception:
+            pass
+
+
+async def process_url_audio_shazam(message: Message, url: str):
+    """URL dan audio yuklab, Shazam bilan aniqlash"""
+    status_msg = await message.answer("🔍 <b>Musiqa aniqlanmoqda...</b>")
+
+    tmp_dir   = tempfile.mkdtemp()
+    aud_path  = os.path.join(tmp_dir, "audio")
+
+    try:
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(
+            None, download_audio_sync, url, aud_path
+        )
+
+        # mp3 faylni topish
+        actual_file = None
+        for f in os.listdir(tmp_dir):
+            if f.endswith(".mp3"):
+                actual_file = os.path.join(tmp_dir, f)
+                break
+
+        if not actual_file:
+            # Har qanday fayl
+            for f in os.listdir(tmp_dir):
+                full = os.path.join(tmp_dir, f)
+                if os.path.isfile(full):
+                    actual_file = full
+                    break
+
+        if not actual_file:
+            await status_msg.edit_text("❌ Audio yuklab bo'lmadi.")
+            return
+
+        result = await recognize_file(actual_file)
+        await status_msg.delete()
+        await message.answer(result, disable_web_page_preview=False)
+
+    except Exception as e:
+        await status_msg.edit_text(f"❌ Xatolik: {str(e)[:200]}")
+    finally:
+        import shutil
+        try:
+            shutil.rmtree(tmp_dir)
+        except Exception:
+            pass
+
 # ─── Handlers ─────────────────────────────────────────────────────────────────
 
 @dp.message_handler(commands=["start"])
 async def cmd_start(message: Message):
     await message.answer(
         "🎵 <b>Shazam Bot</b>\n\n"
-        "Audio yoki video yuboring — qo'shiqni bir zumda topaman!\n\n"
+        "Audio, video yoki havola yuboring — qo'shiqni bir zumda topaman!\n\n"
         "📤 <b>Qabul qilinadi:</b>\n"
         "• 🎵 Audio xabar\n"
         "• 🎤 Ovozli xabar (voice)\n"
         "• 🎬 Video (musiqali)\n"
-        "• 📎 Audio/video fayl\n\n"
+        "• 📎 Audio/video fayl\n"
+        "• 🔗 TikTok / YouTube / Instagram havolasi\n\n"
         "⚡️ Yuboring, topamiz!"
     )
 
@@ -105,8 +264,9 @@ async def cmd_help(message: Message):
     await message.answer(
         "ℹ️ <b>Yordam</b>\n\n"
         "1. Audio, voice yoki video yuboring\n"
-        "2. Bot avtomatik qo'shiqni taniydi\n"
-        "3. Ijrochi, nomi, albom va yilini ko'rsatadi\n\n"
+        "2. Yoki TikTok/YouTube/Instagram linkini yuboring\n"
+        "3. Bot avtomatik qo'shiqni taniydi\n"
+        "4. Ijrochi, nomi, albom va yilini ko'rsatadi\n\n"
         "❗️ <b>Eslatma:</b> Fon shovqini kam bo'lgan audio yaxshiroq taniladi."
     )
 
@@ -124,7 +284,25 @@ async def handle_voice(message: Message):
 
 @dp.message_handler(content_types=ContentType.VIDEO)
 async def handle_video(message: Message):
-    await download_and_recognize(message, message.video.file_id, "mp4")
+    # Avval video yuborib, keyin shazam tugmasi
+    video = message.video
+    await message.answer("🔍 <b>Qo'shiq izlanmoqda...</b>")
+    tmp_path = None
+    try:
+        file = await bot.get_file(video.file_id)
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
+            tmp_path = tmp.name
+        await bot.download_file(file.file_path, tmp_path)
+        result = await recognize_file(tmp_path)
+        await message.answer(result, disable_web_page_preview=False)
+    except Exception as e:
+        await message.answer(f"❌ Xatolik: {str(e)}")
+    finally:
+        if tmp_path:
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
 
 @dp.message_handler(content_types=ContentType.VIDEO_NOTE)
 async def handle_video_note(message: Message):
@@ -143,9 +321,29 @@ async def handle_document(message: Message):
 
 @dp.message_handler(content_types=ContentType.TEXT)
 async def handle_text(message: Message):
-    if message.text.startswith("/"):
+    text = message.text or ""
+
+    if text.startswith("/"):
         return
-    await message.answer("🎵 Audio yoki video yuboring!\n/help — yordam")
+
+    # URL borligini tekshirish
+    match = URL_PATTERN.search(text)
+    if match:
+        url = match.group(0)
+        await process_url(message, url)
+        return
+
+    await message.answer("🎵 Audio, video yoki havola yuboring!\n/help — yordam")
+
+
+# ─── Callback: Shazam tugmasi (URL orqali) ────────────────────────────────────
+
+@dp.callback_query_handler(lambda c: c.data and c.data.startswith("shazam_url:"))
+async def callback_shazam_url(call: types.CallbackQuery):
+    await call.answer("🔍 Musiqa izlanmoqda...")
+    url = call.data[len("shazam_url:"):]
+    await process_url_audio_shazam(call.message, url)
+
 
 # ─── Health check (alohida thread) ────────────────────────────────────────────
 
@@ -180,5 +378,5 @@ if __name__ == "__main__":
         dp,
         on_startup=on_startup,
         skip_updates=True,
-        allowed_updates=["message"]
+        allowed_updates=["message", "callback_query"]
     )
