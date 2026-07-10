@@ -1,9 +1,7 @@
-aiogram
-yt-dlp
-aiohttp
-asyncpg
-aiofiles
-python-dotenv
+aiogram==2.23.1
+asyncpg==0.29.0
+aiohttp==3.9.5
+
 
 
 
