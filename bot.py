@@ -199,15 +199,15 @@ async def process_url(message: Message, url: str):
 
 
 async def process_url_audio_shazam(message: Message, url: str):
-    """URL dan audio yuklab, Shazam bilan aniqlash"""
+    """URL dan audio yuklab, Shazam bilan aniqlash va mp3 yuborish"""
     status_msg = await message.answer("🔍 <b>Musiqa aniqlanmoqda...</b>")
 
-    tmp_dir   = tempfile.mkdtemp()
-    aud_path  = os.path.join(tmp_dir, "audio")
+    tmp_dir  = tempfile.mkdtemp()
+    aud_path = os.path.join(tmp_dir, "audio")
 
     try:
         loop = asyncio.get_event_loop()
-        await loop.run_in_executor(
+        info = await loop.run_in_executor(
             None, download_audio_sync, url, aud_path
         )
 
@@ -219,7 +219,6 @@ async def process_url_audio_shazam(message: Message, url: str):
                 break
 
         if not actual_file:
-            # Har qanday fayl
             for f in os.listdir(tmp_dir):
                 full = os.path.join(tmp_dir, f)
                 if os.path.isfile(full):
@@ -230,9 +229,43 @@ async def process_url_audio_shazam(message: Message, url: str):
             await status_msg.edit_text("❌ Audio yuklab bo'lmadi.")
             return
 
-        result = await recognize_file(actual_file)
+        # Shazam bilan aniqlash
+        shazam_result = await recognize_file(actual_file)
+
+        # Ijrochi va nom Shazam natijasidan olish
+        title    = ""
+        subtitle = ""
+        try:
+            raw = await shazam.recognize(actual_file)
+            track = raw.get("track", {})
+            title    = track.get("title", "")
+            subtitle = track.get("subtitle", "")
+        except Exception:
+            pass
+
+        performer   = subtitle or (info.get("uploader", "") if info else "")
+        track_title = title    or (info.get("title", "Audio") if info else "Audio")
+        duration    = int(info.get("duration", 0)) if info else 0
+
+        file_size = os.path.getsize(actual_file)
+
         await status_msg.delete()
-        await message.answer(result, disable_web_page_preview=False)
+
+        # Shazam natijasini yubor
+        await message.answer(shazam_result, disable_web_page_preview=False)
+
+        # mp3 faylni audio sifatida yubor (50MB limit)
+        if file_size <= 50 * 1024 * 1024:
+            with open(actual_file, "rb") as af:
+                await message.answer_audio(
+                    af,
+                    title=track_title,
+                    performer=performer,
+                    duration=duration,
+                    caption=f"📥 @{BOT_USERNAME} orqali yuklab olindi!",
+                )
+        else:
+            await message.answer("❌ Audio hajmi 50MB dan katta, yuborib bo'lmadi.")
 
     except Exception as e:
         await status_msg.edit_text(f"❌ Xatolik: {str(e)[:200]}")
