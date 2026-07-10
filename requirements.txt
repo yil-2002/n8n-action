@@ -1,7 +1,8 @@
 aiogram==2.23.1
 aiohttp
 shazamio
-yt-dlp
+yt-dlp>=2024.11.18
+
 
 
 
