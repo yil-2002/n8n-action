@@ -97,34 +97,77 @@ async def download_and_recognize(message: Message, file_id: str, ext: str):
                 pass
 
 
-def download_video_sync(url: str, output_path: str) -> dict:
-    """yt-dlp orqali video yuklash (sync, thread ichida)"""
-    ydl_opts = {
-        "outtmpl": output_path,
-        "format": "best[ext=mp4]/best",
+def is_youtube(url: str) -> bool:
+    return "youtube.com" in url or "youtu.be" in url
+
+def is_instagram(url: str) -> bool:
+    return "instagram.com" in url
+
+def base_ydl_opts(url: str) -> dict:
+    """Har bir platforma uchun umumiy yt-dlp sozlamalar"""
+    opts = {
         "quiet": True,
         "no_warnings": True,
-        "merge_output_format": "mp4",
+        "socket_timeout": 30,
+        # Bot detection bypass
+        "http_headers": {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/125.0.0.0 Safari/537.36"
+            ),
+            "Accept-Language": "en-US,en;q=0.9",
+        },
     }
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+
+    if is_youtube(url):
+        opts.update({
+            # YouTube uchun android client — cookiesiz ishlaydi
+            "extractor_args": {
+                "youtube": {
+                    "player_client": ["android"],
+                    "skip": ["webpage"],
+                }
+            },
+        })
+
+    if is_instagram(url):
+        opts.update({
+            # Instagram public video uchun
+            "extractor_args": {
+                "instagram": {"include_ads": False}
+            },
+        })
+
+    return opts
+
+
+def download_video_sync(url: str, output_path: str) -> dict:
+    """yt-dlp orqali video yuklash (sync, thread ichida)"""
+    opts = base_ydl_opts(url)
+    opts.update({
+        "outtmpl": output_path,
+        "format": "best[ext=mp4][filesize<50M]/best[ext=mp4]/best",
+        "merge_output_format": "mp4",
+    })
+    with yt_dlp.YoutubeDL(opts) as ydl:
         info = ydl.extract_info(url, download=True)
         return info
 
 
 def download_audio_sync(url: str, output_path: str) -> dict:
     """yt-dlp orqali faqat audio yuklash (sync, thread ichida)"""
-    ydl_opts = {
+    opts = base_ydl_opts(url)
+    opts.update({
         "outtmpl": output_path,
         "format": "bestaudio/best",
-        "quiet": True,
-        "no_warnings": True,
         "postprocessors": [{
             "key": "FFmpegExtractAudio",
             "preferredcodec": "mp3",
             "preferredquality": "192",
         }],
-    }
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+    })
+    with yt_dlp.YoutubeDL(opts) as ydl:
         info = ydl.extract_info(url, download=True)
         return info
 
@@ -186,7 +229,19 @@ async def process_url(message: Message, url: str):
         await message.answer("👇 Videodagi musiqani topish uchun:", reply_markup=shazam_kb)
 
     except yt_dlp.utils.DownloadError as e:
-        await status_msg.edit_text(f"❌ Yuklab bo'lmadi: {str(e)[:200]}")
+        err = str(e)
+        if "Sign in" in err or "bot" in err.lower():
+            await status_msg.edit_text(
+                "❌ <b>YouTube bu linkni blokladi.</b>\n\n"
+                "YouTube Shorts yoki boshqa platformadan urinib ko'ring."
+            )
+        elif "instagram" in err.lower() or "login" in err.lower():
+            await status_msg.edit_text(
+                "❌ <b>Instagram private video.</b>\n\n"
+                "Faqat public (ochiq) Instagram postlarni yuklab olish mumkin."
+            )
+        else:
+            await status_msg.edit_text(f"❌ Yuklab bolmadi: {err[:250]}")
     except Exception as e:
         await status_msg.edit_text(f"❌ Xatolik: {str(e)[:200]}")
     finally:
