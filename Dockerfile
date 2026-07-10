@@ -6,24 +6,21 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-RUN pip install --upgrade pip
+RUN pip install --upgrade pip setuptools wheel
 
-COPY requirements.txt .
+RUN pip install --no-cache-dir shazamio
 
 RUN pip install --no-cache-dir \
     aiogram \
     yt-dlp \
-    aiohttp \
     asyncpg \
     aiofiles \
     python-dotenv
-
-RUN pip install --no-cache-dir shazamio --no-deps
-RUN pip install --no-cache-dir aiohttp requests
 
 COPY . .
 
 RUN mkdir -p downloads
 
 CMD ["python", "bot.py"]
+
 
