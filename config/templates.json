@@ -1,5 +1,5 @@
 {
-  "default_negative_prompt": "distorted face, extra limbs, warped car body, changed logo, text, watermark, blurry, flicker",
+  "_izoh": "Shablonlar. Yangi shablon = shu ro'yxatga yangi obyekt, so'ng `python3 scripts/build.py` va sql/002_seed.sql ni Supabase'da ishga tushirish (yoki to'g'ridan-to'g'ri Supabase -> templates jadvaliga qator qo'shish). negative_prompt null bo'lsa settings.default_negative_prompt olinadi.",
   "templates": [
     {
       "id": "car_night_city",
@@ -9,7 +9,9 @@
       "negative_prompt": null,
       "duration": 5,
       "active": true,
-      "sample_file_id": null
+      "sample_file_id": null,
+      "name_ru": null,
+      "sort_order": 10
     },
     {
       "id": "car_orbit",
@@ -19,7 +21,9 @@
       "negative_prompt": null,
       "duration": 5,
       "active": true,
-      "sample_file_id": null
+      "sample_file_id": null,
+      "name_ru": null,
+      "sort_order": 20
     },
     {
       "id": "car_desert",
@@ -29,7 +33,9 @@
       "negative_prompt": null,
       "duration": 5,
       "active": false,
-      "sample_file_id": null
+      "sample_file_id": null,
+      "name_ru": null,
+      "sort_order": 30
     },
     {
       "id": "car_rain",
@@ -39,7 +45,9 @@
       "negative_prompt": null,
       "duration": 5,
       "active": false,
-      "sample_file_id": null
+      "sample_file_id": null,
+      "name_ru": null,
+      "sort_order": 40
     },
     {
       "id": "portrait_cinematic",
@@ -49,7 +57,9 @@
       "negative_prompt": null,
       "duration": 5,
       "active": false,
-      "sample_file_id": null
+      "sample_file_id": null,
+      "name_ru": null,
+      "sort_order": 50
     },
     {
       "id": "portrait_golden",
@@ -59,7 +69,9 @@
       "negative_prompt": null,
       "duration": 5,
       "active": false,
-      "sample_file_id": null
+      "sample_file_id": null,
+      "name_ru": null,
+      "sort_order": 60
     }
   ]
 }

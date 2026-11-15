@@ -1,0 +1,93 @@
+{
+  "name": "VB5 error-handler",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "6013acb8-abc0-5ce9-9c4a-829260ce669c",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const j = $input.first().json;\nconst esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst err = j.execution?.error?.message || j.trigger?.error?.message || 'unknown';\nconst text = [\n  '⚠️ <b>n8n xato</b>',\n  'Workflow: ' + esc(j.workflow?.name),\n  'Node: ' + esc(j.execution?.lastNodeExecuted || '-'),\n  '<code>' + esc(String(err).slice(0, 800)) + '</code>',\n  j.execution?.url || '',\n].join('\\n');\nreturn [{ json: { method: 'sendMessage', payload: { chat_id: $env.ADMIN_CHAT_ID, text, parse_mode: 'HTML', disable_web_page_preview: true } } }];\n"
+      },
+      "id": "385216d1-0b1b-5654-b386-0667ced32527",
+      "name": "Build alert",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://api.telegram.org/bot' + $env.TELEGRAM_BOT_TOKEN + '/' + $json.method }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          },
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 100
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.payload) }}"
+      },
+      "id": "05629b9f-6ec8-5ab1-839c-f17d8003d46a",
+      "name": "Send TG",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Error Trigger": {
+      "main": [
+        [
+          {
+            "node": "Build alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build alert": {
+      "main": [
+        [
+          {
+            "node": "Send TG",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true
+  },
+  "pinData": {},
+  "active": false,
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}

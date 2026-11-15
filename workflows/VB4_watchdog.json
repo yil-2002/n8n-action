@@ -1,0 +1,478 @@
+{
+  "name": "VB4 watchdog",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 1
+            }
+          ]
+        }
+      },
+      "id": "cd45edfc-d499-5872-9680-7517c31ad838",
+      "name": "Every minute",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH s AS (\n  SELECT coalesce((SELECT value FROM settings WHERE key = 'gen_timeout_min'), '5')::int AS tmo\n), x AS (\n  SELECT o.id AS order_id, o.fal_request_id, o.status_url, o.response_url, o.error_text,\n    CASE\n      WHEN o.fal_request_id IS NULL AND o.submitted_at IS NOT NULL\n           AND o.submitted_at < now() - interval '60 seconds' THEN 'resubmit'\n      WHEN o.fal_request_id IS NULL AND o.submitted_at IS NULL\n           AND o.gen_started_at < now() - interval '2 minutes' THEN 'stuck'\n      WHEN o.fal_request_id IS NOT NULL\n           AND o.submitted_at < now() - interval '60 seconds' THEN 'poll'\n    END AS kind,\n    coalesce(o.submitted_at < now() - make_interval(mins => s.tmo), false) AS timed_out\n  FROM orders o CROSS JOIN s\n  WHERE o.status = 'generating'\n)\nSELECT * FROM x WHERE kind IS NOT NULL",
+        "options": {}
+      },
+      "id": "926d3229-2e53-52fe-afb2-a28c7d8a8570",
+      "name": "Due orders",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        220,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-postgres",
+          "name": "Supabase Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "50847724-ab20-5037-9681-03648869264f",
+                    "leftValue": "={{ $json.kind }}",
+                    "rightValue": "resubmit",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "resubmit"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "d7938db5-6af0-599d-b962-a80e7afed6e3",
+                    "leftValue": "={{ $json.kind }}",
+                    "rightValue": "stuck",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "stuck"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "400003df-6632-5cc2-abe3-fa0f90445b4f",
+                    "leftValue": "={{ $json.kind }}",
+                    "rightValue": "poll",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "poll"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "679b323b-6041-5b1f-a790-535f6709d2e4",
+      "name": "Kind",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        440,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().map((i) => ({ json: {\n  order_id: i.json.order_id,\n  error: i.json.kind === 'stuck' ? 'stuck before submit' : (i.json.error_text || 'submit failed'),\n} }));\n"
+      },
+      "id": "be344efd-76b0-534a-aaf4-dc181c7697a3",
+      "name": "Retry input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.status_url }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          },
+          "timeout": 20000
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Key ' + $env.FAL_KEY }}"
+            }
+          ]
+        }
+      },
+      "id": "7875a0ec-e347-5d03-a74b-290c547ac34f",
+      "name": "fal status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const out = [];\n$input.all().forEach((it, i) => {\n  const row = $('Due orders').itemMatching(i).json;\n  const st = it.json.status;\n  if (st === 'COMPLETED') {\n    out.push({ json: { next: 'completed', order_id: row.order_id, request_id: row.fal_request_id, response_url: row.response_url } });\n  } else if (row.timed_out) {\n    out.push({ json: { next: 'timeout', order_id: row.order_id, error: 'timeout (' + (st || 'unknown') + ')' } });\n  }\n});\nreturn out;\n"
+      },
+      "id": "f226e69e-d48a-5700-ba4c-ae94bacc96ae",
+      "name": "Poll decide",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "d7a46417-de98-5558-909f-816696d8e951",
+                    "leftValue": "={{ $json.next }}",
+                    "rightValue": "completed",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "completed"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "5def5c81-a321-55fd-ae00-a5c2c3e6d9a1",
+                    "leftValue": "={{ $json.next }}",
+                    "rightValue": "timeout",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "timeout"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "8ca5326d-d8e4-5231-80b1-07a2fe1e4e52",
+      "name": "Next",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        1100,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.response_url }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 20000
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Key ' + $env.FAL_KEY }}"
+            }
+          ]
+        }
+      },
+      "id": "bfaf8a9b-26de-5c95-8b48-07198ab53ff7",
+      "name": "fal result",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1320,
+        360
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().map((it, i) => {\n  const p = $('Poll decide').itemMatching(i).json;\n  const r = it.json;\n  const ok = r.statusCode === 200 && !!r.body?.video?.url;\n  return { json: {\n    request_id: p.request_id,\n    status: ok ? 'OK' : 'ERROR',\n    payload: r.body,\n    error: ok ? null : 'result HTTP ' + r.statusCode + ': ' + JSON.stringify(r.body).slice(0, 500),\n  } };\n});\n"
+      },
+      "id": "70065731-b173-5076-9592-70603e47c15d",
+      "name": "Build result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        360
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list",
+          "cachedResultName": "VB3 fal-result"
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": false
+        }
+      },
+      "id": "7cc10224-f22d-5ad8-acdd-a80e4ec36a41",
+      "name": "Run fal-result",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        1760,
+        360
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list",
+          "cachedResultName": "VB2 process-order"
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": false
+        }
+      },
+      "id": "a7fc63d9-51c5-5ba1-8fe1-eae06db866ea",
+      "name": "Run process-order",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        1320,
+        560
+      ]
+    }
+  ],
+  "connections": {
+    "Every minute": {
+      "main": [
+        [
+          {
+            "node": "Due orders",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Due orders": {
+      "main": [
+        [
+          {
+            "node": "Kind",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Kind": {
+      "main": [
+        [
+          {
+            "node": "Retry input",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Retry input",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "fal status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Retry input": {
+      "main": [
+        [
+          {
+            "node": "Run process-order",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "fal status": {
+      "main": [
+        [
+          {
+            "node": "Poll decide",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Poll decide": {
+      "main": [
+        [
+          {
+            "node": "Next",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Next": {
+      "main": [
+        [
+          {
+            "node": "fal result",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Run process-order",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "fal result": {
+      "main": [
+        [
+          {
+            "node": "Build result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build result": {
+      "main": [
+        [
+          {
+            "node": "Run fal-result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true
+  },
+  "pinData": {},
+  "active": false,
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}

@@ -1,0 +1,48 @@
+{
+  "_izoh": "Bot matnlari. {nom} — o'zgaruvchi joyi. HTML: <b>qalin</b>, <i>kursiv</i>, <code>kod</code>. 'ru' bo'sh bo'lsa o'zbekchasi ishlatiladi. Seed'dan keyin matnlarni Supabase -> bot_texts jadvalida ham tahrirlash mumkin.",
+  "start": {
+    "uz": "👋 Assalomu alaykum!\n\n📸 Rasmingizni yuboring — sun'iy intellekt uni <b>5–6 soniyalik kinematik videoga</b> aylantiradi.\n\n🚗 Mashina yoki 👤 portret\n🎨 Tayyor uslublar\n🔁 Har bir buyurtmaga 1 marta bepul qayta yaratish\n\n💰 Narxi: <b>{price} so'm</b>",
+    "ru": ""
+  },
+  "btn_start": { "uz": "🚀 Boshlash", "ru": "" },
+  "btn_menu": { "uz": "🎬 Video yaratish", "ru": "" },
+  "btn_back": { "uz": "⬅️ Orqaga", "ru": "" },
+  "choose_category": { "uz": "Nimani jonlantiramiz? 👇", "ru": "" },
+  "btn_cat_car": { "uz": "🚗 Mashina", "ru": "" },
+  "btn_cat_portrait": { "uz": "👤 Portret", "ru": "" },
+  "choose_template": { "uz": "🎨 Uslubni tanlang:", "ru": "" },
+  "template_caption": { "uz": "<b>{name}</b>", "ru": "" },
+  "btn_choose": { "uz": "✅ Tanlash", "ru": "" },
+  "no_templates": { "uz": "Bu bo'limda hozircha uslublar yo'q. Tez orada qo'shiladi!", "ru": "" },
+  "template_unavailable": { "uz": "Bu uslub hozir mavjud emas. Boshqasini tanlang 👇", "ru": "" },
+  "send_photo_car": {
+    "uz": "✅ Uslub: <b>{name}</b>\n\n📷 Endi mashinangiz rasmini yuboring.\n\n💡 Yaxshi natija uchun:\n• Mashina to'liq kadrga tushsin\n• Yorug' joyda, yon yoki old-yon tomondan\n• Rasm aniq, kamida 720px bo'lsin",
+    "ru": ""
+  },
+  "send_photo_portrait": {
+    "uz": "✅ Uslub: <b>{name}</b>\n\n📷 Endi portret rasmingizni yuboring.\n\n⚠️ <b>Faqat o'zingizning rasmingizni yuklang.</b>\n\n💡 Yuz aniq ko'rinsin, yorug' joyda, kameraga qarab.",
+    "ru": ""
+  },
+  "err_need_template": { "uz": "Avval uslubni tanlang 👇", "ru": "" },
+  "err_not_image": { "uz": "❌ Bu rasm emas. Iltimos, JPG yoki PNG rasm yuboring.", "ru": "" },
+  "err_small": { "uz": "❌ Rasm juda kichik ({w}×{h}). Kamida {min}px bo'lgan rasm yuboring.", "ru": "" },
+  "err_too_big": { "uz": "❌ Fayl juda katta — 20 MB dan oshmasin.", "ru": "" },
+  "err_active_order": { "uz": "⏳ Sizda hali tugallanmagan buyurtma bor. U tayyor bo'lgach, yangisini boshlashingiz mumkin.", "ru": "" },
+  "generating": { "uz": "🎬 Video tayyorlanmoqda… Odatda 1–3 daqiqa.\nTayyor bo'lishi bilan shu yerga yuboramiz.", "ru": "" },
+  "done": { "uz": "✨ Videongiz tayyor!", "ru": "" },
+  "btn_regen": { "uz": "🔁 Qayta yaratish (1 marta bepul)", "ru": "" },
+  "btn_new": { "uz": "➕ Yana buyurtma", "ru": "" },
+  "regen_unavailable": { "uz": "Qayta yaratish imkoniyati allaqachon ishlatilgan yoki sizda boshqa faol buyurtma bor.", "ru": "" },
+  "err_generation": { "uz": "😔 Kechirasiz, videoni yaratishda xatolik yuz berdi. Biz bu haqda xabardormiz va tez orada siz bilan bog'lanamiz.", "ru": "" },
+  "help": { "uz": "Video yaratish uchun pastdagi tugmani bosing 👇", "ru": "" },
+  "not_open": { "uz": "🚧 Bot hozir sinov rejimida. Tez orada hamma uchun ochiladi!", "ru": "" },
+  "admin_file_id": { "uz": "file_id:\n<code>{file_id}</code>", "ru": "" },
+  "admin_failed": {
+    "uz": "🚨 <b>Buyurtma #{order_id} — xato</b>\nFoydalanuvchi: {user}\nShablon: {template}\nUrinishlar: {attempt}\nXato: <code>{error}</code>",
+    "ru": ""
+  },
+  "admin_delivery_failed": {
+    "uz": "🚨 <b>Buyurtma #{order_id}</b>: video tayyor, lekin Telegram'ga yuborib bo'lmadi.\n{video_url}\n<code>{error}</code>",
+    "ru": ""
+  }
+}
