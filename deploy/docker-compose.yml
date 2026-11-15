@@ -1,0 +1,23 @@
+# n8n + Cloudflare quick tunnel
+#   cd deploy && cp .env.example .env   (to'ldiring)
+#   docker compose up -d && ./tunnel.sh
+services:
+  n8n:
+    # "latest" — eng so'nggi barqaror versiya. Ishlab turgan tizimda aniq versiyani yozib qo'ygan ma'qul (masalan n8n:2.x.y).
+    image: docker.n8n.io/n8nio/n8n:latest
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "127.0.0.1:5678:5678"   # faqat VPS ichidan; tashqariga tunnel orqali
+    volumes:
+      - n8n_data:/home/node/.n8n
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --no-autoupdate --url http://n8n:5678
+    depends_on:
+      - n8n
+
+volumes:
+  n8n_data:

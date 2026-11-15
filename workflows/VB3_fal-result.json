@@ -1,0 +1,427 @@
+{
+  "name": "VB3 fal-result",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "fal-result",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "75dac703-605e-5d4b-ac9e-344c2e441b56",
+      "name": "fal webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        200
+      ],
+      "webhookId": "029b1041-5556-5f8b-ac54-a0e83df0f3d8"
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "efdb82ac-9e5c-548d-a9ff-25340a8fffdf",
+      "name": "From watchdog",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const out = [];\nfor (const it of $input.all()) {\n  const j = it.json;\n  let r = j;\n  if (j.headers && j.body !== undefined) {           // fal.ai webhook\n    if (String(j.query?.secret || '') !== String($env.FAL_WEBHOOK_SECRET || '')) continue;\n    r = j.body || {};\n  }\n  if (!r.request_id) continue;\n  const video_url = r.payload?.video?.url || null;\n  const ok = r.status === 'OK' && !!video_url;\n  let error = null;\n  if (!ok) {\n    const e = r.error ?? r.payload?.detail ?? r.payload ?? 'unknown';\n    error = (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 1000);\n  }\n  out.push({ json: { request_id: r.request_id, ok, video_url, error } });\n}\nreturn out;\n"
+      },
+      "id": "8cb2aeb5-1fab-518e-834b-49ede813dff3",
+      "name": "Normalize",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "3647b18f-6de8-587c-a4c8-6e061a483d13",
+              "leftValue": "={{ $json.ok === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "79e56961-978b-56ad-bea3-88249bb7e7d2",
+      "name": "OK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        440,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH d AS (\n  UPDATE orders\n  SET status = 'done', video_url = $2, api_cost_usd = api_cost_usd + $3, done_at = now()\n  WHERE fal_request_id = $1 AND status = 'generating'\n  RETURNING id, user_id, regen_used, video_url\n)\nSELECT d.*, (SELECT jsonb_object_agg(b.key, CASE WHEN u.lang = 'ru' AND coalesce(b.ru, '') <> '' THEN b.ru ELSE b.uz END) FROM bot_texts b) AS texts\nFROM d JOIN users u ON u.telegram_id = d.user_id",
+        "options": {
+          "queryReplacement": "={{ [ $json.request_id, $json.video_url, Number($env.FAL_COST_PER_VIDEO_USD || 0) ] }}"
+        }
+      },
+      "id": "29ee6f05-a6ee-58e9-8638-05b34b17cb29",
+      "name": "Claim done",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        660,
+        200
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-postgres",
+          "name": "Supabase Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const r = $input.first().json;\nif (!r.id) return [];\nconst T = r.texts || {};\n\nconst t = (k, v = {}) => String(T[k] ?? k).replace(/\\{(\\w+)\\}/g, (m, x) => (v[x] ?? m));\nconst esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\n\nconst rows = [];\nif (!r.regen_used) rows.push([{ text: t('btn_regen'), callback_data: 'regen:' + r.id }]);\nrows.push([{ text: t('btn_new'), callback_data: 'new' }]);\nreturn [{ json: {\n  order_id: r.id,\n  video_url: r.video_url,\n  method: 'sendVideo',\n  payload: { chat_id: r.user_id, video: r.video_url, caption: t('done'), parse_mode: 'HTML', supports_streaming: true, reply_markup: { inline_keyboard: rows } },\n} }];\n"
+      },
+      "id": "50e97289-9d40-5500-8ff9-3daac9702d08",
+      "name": "Build video message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://api.telegram.org/bot' + $env.TELEGRAM_BOT_TOKEN + '/' + $json.method }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          },
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 100
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.payload) }}"
+      },
+      "id": "3a5090c0-6b1e-56d4-93ff-76975163653a",
+      "name": "Send video",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1100,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE orders SET video_file_id = $2 WHERE id = $1",
+        "options": {
+          "queryReplacement": "={{ [ $('Build video message').first().json.order_id, $json.result?.video?.file_id ?? $json.result?.document?.file_id ?? null ] }}"
+        }
+      },
+      "id": "f55e3635-6f5e-512e-b27f-e00e4e3d42d9",
+      "name": "Save file_id",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1320,
+        120
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-postgres",
+          "name": "Supabase Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "75118ae9-0589-5629-b24b-a32cbfcd1495",
+              "leftValue": "={{ $json.ok !== true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "03202bd0-5748-5b3d-8c69-ecf6168502af",
+      "name": "Delivery failed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1320,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const m = $('Build video message').first().json;\nconst r = $input.first().json;\nconst T = $('Claim done').first().json.texts || {};\n\nconst t = (k, v = {}) => String(T[k] ?? k).replace(/\\{(\\w+)\\}/g, (m, x) => (v[x] ?? m));\nconst esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\n\nreturn [{ json: { method: 'sendMessage', payload: {\n  chat_id: $env.ADMIN_CHAT_ID, parse_mode: 'HTML', disable_web_page_preview: true,\n  text: t('admin_delivery_failed', { order_id: m.order_id, video_url: esc(m.video_url), error: esc(r.description || JSON.stringify(r).slice(0, 300)) }),\n} } }];\n"
+      },
+      "id": "dffb40b8-cda7-5ca0-9f13-b5d3894da945",
+      "name": "Build delivery alert",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://api.telegram.org/bot' + $env.TELEGRAM_BOT_TOKEN + '/' + $json.method }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          },
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 100
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.payload) }}"
+      },
+      "id": "de056829-08ae-5280-ad24-2a9842ece9ae",
+      "name": "Send alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1760,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id AS order_id, $2::text AS error\nFROM orders WHERE fal_request_id = $1 AND status = 'generating'",
+        "options": {
+          "queryReplacement": "={{ [ $json.request_id, $json.error ] }}"
+        }
+      },
+      "id": "93269f59-cd87-5565-94e9-45a875cd96f0",
+      "name": "Find order",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        660,
+        440
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-postgres",
+          "name": "Supabase Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list",
+          "cachedResultName": "VB2 process-order"
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": false
+        }
+      },
+      "id": "9d2a513d-e897-50ce-9f71-bfe2e3ae9b02",
+      "name": "Run process-order",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        880,
+        440
+      ]
+    }
+  ],
+  "connections": {
+    "fal webhook": {
+      "main": [
+        [
+          {
+            "node": "Normalize",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "From watchdog": {
+      "main": [
+        [
+          {
+            "node": "Normalize",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize": {
+      "main": [
+        [
+          {
+            "node": "OK?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OK?": {
+      "main": [
+        [
+          {
+            "node": "Claim done",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Find order",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claim done": {
+      "main": [
+        [
+          {
+            "node": "Build video message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build video message": {
+      "main": [
+        [
+          {
+            "node": "Send video",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send video": {
+      "main": [
+        [
+          {
+            "node": "Save file_id",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Delivery failed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Delivery failed?": {
+      "main": [
+        [
+          {
+            "node": "Build delivery alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build delivery alert": {
+      "main": [
+        [
+          {
+            "node": "Send alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find order": {
+      "main": [
+        [
+          {
+            "node": "Run process-order",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true
+  },
+  "pinData": {},
+  "active": false,
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}

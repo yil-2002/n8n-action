@@ -1,0 +1,12 @@
+{
+  "price_uzs": { "value": "20000", "note": "Buyurtma narxi, so'm" },
+  "enabled_categories": { "value": "car", "note": "Vergul bilan: car,portrait" },
+  "sample_video_file_id": { "value": "", "note": "/start dagi namuna video. Admin botga video yuborsa, bot file_id ni qaytaradi" },
+  "default_negative_prompt": {
+    "value": "distorted face, extra limbs, warped car body, changed logo, text, watermark, blurry, flicker",
+    "note": "Shablonda negative_prompt bo'sh bo'lsa ishlatiladi (faqat Kling qo'llaydi)"
+  },
+  "min_image_side": { "value": "720", "note": "Rasmning qisqa tomoni kamida necha px" },
+  "max_attempts": { "value": "2", "note": "fal.ai'ga necha marta yuborish (1 = qayta urinishsiz)" },
+  "gen_timeout_min": { "value": "5", "note": "Bitta urinish uchun timeout, daqiqa" }
+}

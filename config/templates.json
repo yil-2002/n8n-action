@@ -1,0 +1,77 @@
+{
+  "_izoh": "Shablonlar. Yangi shablon = shu ro'yxatga yangi obyekt, so'ng `python3 scripts/build.py` va sql/002_seed.sql ni Supabase'da ishga tushirish (yoki to'g'ridan-to'g'ri Supabase -> templates jadvaliga qator qo'shish). negative_prompt null bo'lsa settings.default_negative_prompt olinadi.",
+  "templates": [
+    {
+      "id": "car_night_city",
+      "category": "car",
+      "name_uz": "🌃 Night City",
+      "prompt": "Cinematic shot of this exact car driving slowly through a neon-lit city street at night, wet asphalt reflections, smooth camera tracking from the side, realistic lighting, keep the car's design, color and wheels unchanged.",
+      "negative_prompt": null,
+      "duration": 5,
+      "active": true,
+      "sample_file_id": null,
+      "name_ru": null,
+      "sort_order": 10
+    },
+    {
+      "id": "car_orbit",
+      "category": "car",
+      "name_uz": "🔄 360° aylanish",
+      "prompt": "Smooth slow orbit camera move around this exact car parked in a premium studio with soft light, glossy reflections, car stays still, design and color unchanged.",
+      "negative_prompt": null,
+      "duration": 5,
+      "active": true,
+      "sample_file_id": null,
+      "name_ru": null,
+      "sort_order": 20
+    },
+    {
+      "id": "car_desert",
+      "category": "car",
+      "name_uz": "🏜 Cho'l",
+      "prompt": "This exact car driving fast along a desert road at golden hour, dust trail behind the wheels, low-angle tracking camera, cinematic, car design unchanged.",
+      "negative_prompt": null,
+      "duration": 5,
+      "active": false,
+      "sample_file_id": null,
+      "name_ru": null,
+      "sort_order": 30
+    },
+    {
+      "id": "car_rain",
+      "category": "car",
+      "name_uz": "🌧 Yomg'ir",
+      "prompt": "This exact car parked under heavy rain at night, headlights turn on, raindrops on the body, slow push-in camera, moody cinematic lighting.",
+      "negative_prompt": null,
+      "duration": 5,
+      "active": false,
+      "sample_file_id": null,
+      "name_ru": null,
+      "sort_order": 40
+    },
+    {
+      "id": "portrait_cinematic",
+      "category": "portrait",
+      "name_uz": "🎬 Kino kadri",
+      "prompt": "The person slowly turns their head toward the camera and smiles softly, gentle wind in the hair, cinematic shallow depth of field, natural face, identity unchanged.",
+      "negative_prompt": null,
+      "duration": 5,
+      "active": false,
+      "sample_file_id": null,
+      "name_ru": null,
+      "sort_order": 50
+    },
+    {
+      "id": "portrait_golden",
+      "category": "portrait",
+      "name_uz": "🌅 Oltin soat",
+      "prompt": "The person stands in warm golden-hour sunlight, light breeze, slow camera push-in, calm natural expression, identity unchanged.",
+      "negative_prompt": null,
+      "duration": 5,
+      "active": false,
+      "sample_file_id": null,
+      "name_ru": null,
+      "sort_order": 60
+    }
+  ]
+}

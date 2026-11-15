@@ -1,0 +1,697 @@
+{
+  "name": "VB1 bot-main",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": [
+          "message",
+          "callback_query"
+        ],
+        "additionalFields": {}
+      },
+      "id": "f35676bd-16e8-5d35-8a20-1556d1b037bb",
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        300
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram-bot",
+          "name": "Telegram Bot"
+        }
+      },
+      "webhookId": "0147e36e-afcd-5adc-850b-fb5750170015"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Telegram update -> bitta tekis obyekt\nconst u = $input.first().json;\nconst m = u.message;\nconst cq = u.callback_query;\nconst msg = m || cq?.message;\nconst from = m?.from || cq?.from;\nif (!msg || !from || msg.chat?.type !== 'private') return [];\n\nconst out = {\n  chat_id: msg.chat.id,\n  user_id: from.id,\n  username: from.username || null,\n  first_name: from.first_name || null,\n  kind: 'text',\n  text: m?.text || '',\n  cb_id: cq?.id || null,\n  cb_data: cq?.data || '',\n  cb_message_id: cq?.message?.message_id || null,\n  photo: null,\n  doc: null,\n  video_file_id: null,\n};\nif (cq) {\n  out.kind = 'callback';\n} else if (m.photo?.length) {\n  const p = m.photo.reduce((a, b) => (b.width * b.height > a.width * a.height ? b : a));\n  out.kind = 'photo';\n  out.photo = { file_id: p.file_id, width: p.width, height: p.height };\n} else if (m.document) {\n  out.kind = 'document';\n  out.doc = { file_id: m.document.file_id, mime_type: m.document.mime_type || '', file_size: m.document.file_size || 0 };\n} else if (m.video || m.animation) {\n  out.kind = 'video';\n  out.video_file_id = (m.video || m.animation).file_id;\n}\nreturn [{ json: out }];\n"
+      },
+      "id": "0f418a21-f499-5384-8dca-dcde311b50d7",
+      "name": "Normalize",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH u AS (\n  INSERT INTO users (telegram_id, username, first_name)\n  VALUES ($1, $2, $3)\n  ON CONFLICT (telegram_id) DO UPDATE\n    SET username = EXCLUDED.username, first_name = EXCLUDED.first_name, last_seen_at = now()\n  RETURNING telegram_id, lang, state, selected_template\n)\nSELECT u.*,\n  (SELECT jsonb_object_agg(b.key, CASE WHEN u.lang = 'ru' AND coalesce(b.ru, '') <> '' THEN b.ru ELSE b.uz END) FROM bot_texts b) AS texts,\n  (SELECT jsonb_object_agg(key, value) FROM settings) AS settings\nFROM u",
+        "options": {
+          "queryReplacement": "={{ [ $json.user_id, $json.username, $json.first_name ] }}"
+        }
+      },
+      "id": "0bd6081a-f02b-5af5-b0b2-e63b895fdd84",
+      "name": "Context",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        440,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-postgres",
+          "name": "Supabase Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const n = $('Normalize').first().json;\nconst ctx = $input.first().json;\nconst T = ctx.texts || {};\nconst S = ctx.settings || {};\n\nconst t = (k, v = {}) => String(T[k] ?? k).replace(/\\{(\\w+)\\}/g, (m, x) => (v[x] ?? m));\nconst esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\n\nconst chat_id = n.chat_id;\nconst out = [];\nconst call = (method, payload) => out.push({ json: { route: 'reply', method, payload } });\nconst say = (text, rows) => call('sendMessage', {\n  chat_id, text, parse_mode: 'HTML',\n  ...(rows ? { reply_markup: { inline_keyboard: rows } } : {}),\n});\nconst go = (route, extra = {}) => out.push({ json: { route, chat_id, user_id: n.user_id, ...extra } });\n\nif (n.cb_id) call('answerCallbackQuery', { callback_query_id: n.cb_id });\n\n// --- MVP: kirish cheklovi ---\nconst isAdmin = String(n.user_id) === String($env.ADMIN_CHAT_ID);\nconst allowed = String($env.ALLOWED_USER_IDS || '').split(',').map((s) => s.trim()).filter(Boolean);\nconst isPublic = String($env.BOT_PUBLIC || 'false') === 'true';\nif (!isPublic && !isAdmin && !allowed.includes(String(n.user_id))) {\n  say(t('not_open'));\n  return out;\n}\n\nconst price = String(S.price_uzs || '0').replace(/\\B(?=(\\d{3})+(?!\\d))/g, ' ');\nconst cats = String(S.enabled_categories || 'car').split(',').map((s) => s.trim()).filter(Boolean);\nconst minSide = Number(S.min_image_side || 720);\nconst showCategories = () =>\n  say(t('choose_category'), cats.map((c) => [{ text: t('btn_cat_' + c), callback_data: 'cat:' + c }]));\nconst d = n.cb_data;\n\nif (n.kind === 'text' && /^\\/start\\b/.test(n.text)) {\n  const caption = t('start', { price });\n  const rows = [[{ text: t('btn_start'), callback_data: 'menu' }]];\n  if (S.sample_video_file_id) {\n    call('sendVideo', { chat_id, video: S.sample_video_file_id, caption, parse_mode: 'HTML', reply_markup: { inline_keyboard: rows } });\n  } else {\n    say(caption, rows);\n  }\n} else if (d === 'menu' || d === 'new') {\n  showCategories();\n} else if (d.startsWith('cat:')) {\n  const c = d.slice(4);\n  if (cats.includes(c)) go('list_templates', { category: c });\n  else showCategories();\n} else if (d.startsWith('tpl:')) {\n  go('select_template', { template_id: d.slice(4) });\n} else if (d.startsWith('regen:')) {\n  go('regen', { order_id: Number(d.slice(6)), cb_message_id: n.cb_message_id });\n} else if (n.kind === 'photo' || n.kind === 'document') {\n  if (ctx.state !== 'awaiting_photo' || !ctx.selected_template) {\n    say(t('err_need_template'));\n    showCategories();\n  } else if (n.kind === 'document' && !/^image\\/(jpeg|png|webp)$/i.test(n.doc.mime_type)) {\n    say(t('err_not_image'));\n  } else if (n.kind === 'document' && n.doc.file_size > 20 * 1024 * 1024) {\n    say(t('err_too_big'));\n  } else if (n.kind === 'photo' && Math.min(n.photo.width, n.photo.height) < minSide) {\n    say(t('err_small', { w: n.photo.width, h: n.photo.height, min: minSide }));\n  } else {\n    const img = n.kind === 'photo' ? n.photo : { file_id: n.doc.file_id, width: null, height: null };\n    go('create_order', { template_id: ctx.selected_template, file_id: img.file_id, width: img.width, height: img.height });\n  }\n} else if (n.kind === 'video' && isAdmin) {\n  say(t('admin_file_id', { file_id: esc(n.video_file_id) }));\n} else if (!n.cb_id) {\n  say(t('help'), [[{ text: t('btn_menu'), callback_data: 'menu' }]]);\n}\nreturn out;\n"
+      },
+      "id": "b867b259-49db-5564-be20-3faf0a2e491a",
+      "name": "Router",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "889d5d2c-c486-533a-9fe6-9f02e1164fcb",
+                    "leftValue": "={{ $json.route }}",
+                    "rightValue": "reply",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "reply"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "4f93b464-a63a-561b-9b2d-2b2112e2219a",
+                    "leftValue": "={{ $json.route }}",
+                    "rightValue": "list_templates",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "list_templates"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "1bf1b9c2-22b4-5a7d-96db-61ec122fb176",
+                    "leftValue": "={{ $json.route }}",
+                    "rightValue": "select_template",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "select_template"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "eb5abd26-9133-54c6-9c2c-92f9f89fac67",
+                    "leftValue": "={{ $json.route }}",
+                    "rightValue": "create_order",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "create_order"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "13024af2-1d06-548a-9a4d-9d6c5e8f1aea",
+                    "leftValue": "={{ $json.route }}",
+                    "rightValue": "regen",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "regen"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "d0c0cd69-0f08-5a49-acb8-778d4fd85442",
+      "name": "Route",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        880,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://api.telegram.org/bot' + $env.TELEGRAM_BOT_TOKEN + '/' + $json.method }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          },
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 100
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.payload) }}"
+      },
+      "id": "a22b5755-c527-57fb-9b30-58602e6bafb9",
+      "name": "Send TG",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1760,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id,\n       coalesce(CASE WHEN $2 = 'ru' THEN name_ru END, name_uz) AS name,\n       sample_file_id\nFROM templates\nWHERE category = $1 AND active\nORDER BY sort_order, id",
+        "options": {
+          "queryReplacement": "={{ [ $json.category, $('Context').first().json.lang ] }}"
+        }
+      },
+      "id": "63b57786-425d-5361-a4f1-4b32f4e1c10b",
+      "name": "Templates",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1100,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-postgres",
+          "name": "Supabase Postgres"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const ctx = $('Context').first().json;\nconst chat_id = $('Normalize').first().json.chat_id;\nconst T = ctx.texts || {};\n\nconst t = (k, v = {}) => String(T[k] ?? k).replace(/\\{(\\w+)\\}/g, (m, x) => (v[x] ?? m));\nconst esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\n\nconst rows = $input.all().map((i) => i.json).filter((r) => r.id);\nconst out = [];\nconst send = (method, payload) => out.push({ json: { method, payload: { chat_id, parse_mode: 'HTML', ...payload } } });\nconst back = [{ text: t('btn_back'), callback_data: 'menu' }];\n\nif (!rows.length) {\n  send('sendMessage', { text: t('no_templates'), reply_markup: { inline_keyboard: [back] } });\n  return out;\n}\nconst buttons = [];\nfor (const r of rows) {\n  const btn = { text: t('btn_choose') + ' — ' + r.name, callback_data: 'tpl:' + r.id };\n  if (r.sample_file_id) {\n    send('sendVideo', { video: r.sample_file_id, caption: t('template_caption', { name: esc(r.name) }), reply_markup: { inline_keyboard: [[btn]] } });\n  } else {\n    buttons.push([btn]);\n  }\n}\nbuttons.push(back);\nsend('sendMessage', { text: t('choose_template'), reply_markup: { inline_keyboard: buttons } });\nreturn out;\n"
+      },
+      "id": "63791da3-0bf7-5fd4-a7a4-9ddbd33c5d59",
+      "name": "Build template list",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH t AS (\n  SELECT id, category, coalesce(CASE WHEN $3 = 'ru' THEN name_ru END, name_uz) AS name\n  FROM templates WHERE id = $2 AND active\n), u AS (\n  UPDATE users SET state = 'awaiting_photo', selected_template = $2\n  WHERE telegram_id = $1 AND EXISTS (SELECT 1 FROM t)\n  RETURNING telegram_id\n)\nSELECT category, name FROM t",
+        "options": {
+          "queryReplacement": "={{ [ $json.user_id, $json.template_id, $('Context').first().json.lang ] }}"
+        }
+      },
+      "id": "07259dab-20d8-527a-8c60-b5418da584f4",
+      "name": "Set template",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1100,
+        200
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-postgres",
+          "name": "Supabase Postgres"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const ctx = $('Context').first().json;\nconst chat_id = $('Normalize').first().json.chat_id;\nconst T = ctx.texts || {};\n\nconst t = (k, v = {}) => String(T[k] ?? k).replace(/\\{(\\w+)\\}/g, (m, x) => (v[x] ?? m));\nconst esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\n\nconst r = $input.first().json;\nconst text = r.category ? t('send_photo_' + r.category, { name: esc(r.name) }) : t('template_unavailable');\nconst markup = r.category ? undefined : { inline_keyboard: [[{ text: t('btn_back'), callback_data: 'menu' }]] };\nreturn [{ json: { method: 'sendMessage', payload: { chat_id, text, parse_mode: 'HTML', ...(markup ? { reply_markup: markup } : {}) } } }];\n"
+      },
+      "id": "b38612af-fa81-5118-9753-4329739c307d",
+      "name": "Build ask photo",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH ok AS (\n  SELECT 1 FROM templates WHERE id = $2 AND active\n), busy AS (\n  SELECT 1 FROM orders WHERE user_id = $1 AND status IN ('awaiting_payment', 'paid', 'generating')\n), ins AS (\n  INSERT INTO orders (user_id, template_id, photo_file_id, photo_width, photo_height, status, amount_uzs, gen_started_at)\n  SELECT $1, $2, $3, $4, $5, 'generating', 0, now()\n  WHERE EXISTS (SELECT 1 FROM ok) AND NOT EXISTS (SELECT 1 FROM busy)\n  RETURNING id\n), u AS (\n  UPDATE users SET state = 'idle', selected_template = NULL, total_orders = total_orders + 1\n  WHERE telegram_id = $1 AND EXISTS (SELECT 1 FROM ins)\n  RETURNING telegram_id\n)\nSELECT (SELECT id FROM ins) AS order_id,\n       EXISTS (SELECT 1 FROM busy) AS busy",
+        "options": {
+          "queryReplacement": "={{ [ $json.user_id, $json.template_id, $json.file_id, $json.width, $json.height ] }}"
+        }
+      },
+      "id": "135d55b9-8f39-5bee-9c54-69c0e9a8ab7a",
+      "name": "Create order",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1100,
+        420
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-postgres",
+          "name": "Supabase Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const ctx = $('Context').first().json;\nconst chat_id = $('Normalize').first().json.chat_id;\nconst T = ctx.texts || {};\n\nconst t = (k, v = {}) => String(T[k] ?? k).replace(/\\{(\\w+)\\}/g, (m, x) => (v[x] ?? m));\nconst esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\n\nconst r = $input.first().json;\nlet text;\nlet markup;\nif (r.order_id) text = t('generating');\nelse if (r.busy) text = t('err_active_order');\nelse { text = t('template_unavailable'); markup = { inline_keyboard: [[{ text: t('btn_back'), callback_data: 'menu' }]] }; }\nreturn [{ json: { method: 'sendMessage', payload: { chat_id, text, parse_mode: 'HTML', ...(markup ? { reply_markup: markup } : {}) } } }];\n"
+      },
+      "id": "6c076669-9ac9-53cc-9841-c0428799e541",
+      "name": "Build order reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "fccd50b1-ef8e-532e-a173-2336fcc44dea",
+              "leftValue": "={{ !!$json.order_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "494632e1-27fe-5fb6-89cb-8088821d04c3",
+      "name": "Order created?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1320,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list",
+          "cachedResultName": "VB2 process-order"
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": false
+        }
+      },
+      "id": "0459d043-68ca-5fdd-be1a-ad922400ad77",
+      "name": "Run process-order",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        1540,
+        640
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH busy AS (\n  SELECT 1 FROM orders WHERE user_id = $2 AND status IN ('awaiting_payment', 'paid', 'generating')\n)\nUPDATE orders\nSET regen_used = true, status = 'generating', attempt = 0,\n    fal_request_id = NULL, status_url = NULL, response_url = NULL,\n    prev_video_url = video_url, video_url = NULL,\n    gen_started_at = now(), submitted_at = NULL, error_text = NULL\nWHERE id = $1 AND user_id = $2 AND status = 'done' AND regen_used = false\n  AND NOT EXISTS (SELECT 1 FROM busy)\nRETURNING id AS order_id",
+        "options": {
+          "queryReplacement": "={{ [ $json.order_id, $json.user_id ] }}"
+        }
+      },
+      "id": "598ab30c-f04d-5029-a895-4f8bc62aa3f8",
+      "name": "Start regen",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1100,
+        780
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-postgres",
+          "name": "Supabase Postgres"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const ctx = $('Context').first().json;\nconst n = $('Normalize').first().json;\nconst chat_id = n.chat_id;\nconst T = ctx.texts || {};\n\nconst t = (k, v = {}) => String(T[k] ?? k).replace(/\\{(\\w+)\\}/g, (m, x) => (v[x] ?? m));\nconst esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\n\nconst r = $input.first().json;\nconst out = [];\nif (r.order_id) {\n  if (n.cb_message_id) {\n    out.push({ json: { method: 'editMessageReplyMarkup', payload: {\n      chat_id, message_id: n.cb_message_id,\n      reply_markup: { inline_keyboard: [[{ text: t('btn_new'), callback_data: 'new' }]] },\n    } } });\n  }\n  out.push({ json: { method: 'sendMessage', payload: { chat_id, text: t('generating'), parse_mode: 'HTML' } } });\n} else {\n  out.push({ json: { method: 'sendMessage', payload: { chat_id, text: t('regen_unavailable'), parse_mode: 'HTML' } } });\n}\nreturn out;\n"
+      },
+      "id": "91c91c47-6836-525a-afe2-4b590e316519",
+      "name": "Build regen reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        780
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "fe8fee69-67dc-5298-8f47-44e899e5c3d0",
+              "leftValue": "={{ !!$json.order_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "0944d82f-c190-5c6c-a5c6-fe7f525f18da",
+      "name": "Regen started?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1320,
+        920
+      ]
+    }
+  ],
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "Normalize",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize": {
+      "main": [
+        [
+          {
+            "node": "Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Context": {
+      "main": [
+        [
+          {
+            "node": "Router",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Router": {
+      "main": [
+        [
+          {
+            "node": "Route",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route": {
+      "main": [
+        [
+          {
+            "node": "Send TG",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Templates",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Set template",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Create order",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Start regen",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Templates": {
+      "main": [
+        [
+          {
+            "node": "Build template list",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build template list": {
+      "main": [
+        [
+          {
+            "node": "Send TG",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set template": {
+      "main": [
+        [
+          {
+            "node": "Build ask photo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build ask photo": {
+      "main": [
+        [
+          {
+            "node": "Send TG",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create order": {
+      "main": [
+        [
+          {
+            "node": "Build order reply",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Order created?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build order reply": {
+      "main": [
+        [
+          {
+            "node": "Send TG",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Order created?": {
+      "main": [
+        [
+          {
+            "node": "Run process-order",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Start regen": {
+      "main": [
+        [
+          {
+            "node": "Build regen reply",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Regen started?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build regen reply": {
+      "main": [
+        [
+          {
+            "node": "Send TG",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Regen started?": {
+      "main": [
+        [
+          {
+            "node": "Run process-order",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true
+  },
+  "pinData": {},
+  "active": false,
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}

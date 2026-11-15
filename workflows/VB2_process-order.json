@@ -1,0 +1,481 @@
+{
+  "name": "VB2 process-order",
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "7174b859-d9b2-5ea0-89ec-6c1aff0e43d1",
+      "name": "Start",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT o.id, o.user_id, o.status, o.attempt, o.photo_file_id, o.template_id,\n       t.prompt, t.duration,\n       coalesce(nullif(t.negative_prompt, ''), (SELECT value FROM settings WHERE key = 'default_negative_prompt')) AS negative_prompt,\n       $2::text AS error,\n       (SELECT jsonb_object_agg(key, value) FROM settings) AS settings,\n       (SELECT jsonb_object_agg(b.key, CASE WHEN u.lang = 'ru' AND coalesce(b.ru, '') <> '' THEN b.ru ELSE b.uz END) FROM bot_texts b) AS texts\nFROM orders o\nJOIN templates t ON t.id = o.template_id\nJOIN users u ON u.telegram_id = o.user_id\nWHERE o.id = $1",
+        "options": {
+          "queryReplacement": "={{ [ $json.order_id, $json.error || '' ] }}"
+        }
+      },
+      "id": "4dbadcef-e5db-5a72-a195-dc590627aabf",
+      "name": "Load order",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        220,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-postgres",
+          "name": "Supabase Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// submit: fal.ai'ga (qayta) yuborish | fail: urinishlar tugadi\nreturn $input.all().filter((i) => i.json.id).map((i) => {\n  const o = i.json;\n  const max = Number(o.settings?.max_attempts || 2);\n  let action = 'skip';\n  if (o.status === 'generating') action = o.error && o.attempt >= max ? 'fail' : 'submit';\n  return { json: { ...o, action, max_attempts: max } };\n});\n"
+      },
+      "id": "f541c478-16a2-52f9-a65a-68c59fd335d4",
+      "name": "Decide",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "178451de-556b-5b9e-9f5d-d86d64029fb5",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "submit",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "submit"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "44441f6c-fb84-5b8b-9f31-488b29ac3532",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "fail",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "fail"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "4231d81c-93c6-5197-88a8-ba53e3274baa",
+      "name": "Action",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        660,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE orders\nSET attempt = attempt + 1, submitted_at = now(), model = $3,\n    fal_request_id = NULL, status_url = NULL, response_url = NULL\nWHERE id = $1 AND status = 'generating' AND attempt = $2\nRETURNING id, attempt",
+        "options": {
+          "queryReplacement": "={{ [ $json.id, $json.attempt, $env.FAL_MODEL ] }}"
+        }
+      },
+      "id": "0cd4aceb-b473-5b53-b964-3860770cdf40",
+      "name": "Start attempt",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        880,
+        200
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-postgres",
+          "name": "Supabase Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ 'https://api.telegram.org/bot' + $env.TELEGRAM_BOT_TOKEN + '/getFile?file_id=' + encodeURIComponent($('Decide').first().json.photo_file_id) }}",
+        "options": {}
+      },
+      "id": "138090bc-9bee-5481-a5dd-cdfa4bdcf204",
+      "name": "TG getFile",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1100,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ 'https://api.telegram.org/file/bot' + $env.TELEGRAM_BOT_TOKEN + '/' + $json.result.file_path }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file",
+              "outputPropertyName": "data"
+            }
+          }
+        }
+      },
+      "id": "9549cc6f-e94c-5f84-adb5-c7bd2b9d1bf6",
+      "name": "TG download",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1320,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Rasm -> data URI (fal.ai qabul qiladi). Telegram fayl URL'ini bermaymiz: unda bot tokeni bor.\nconst o = $('Decide').first().json;\nconst buf = await this.helpers.getBinaryDataBuffer(0, 'data');\nlet mime = 'image/jpeg';\nif (buf[0] === 0x89 && buf[1] === 0x50) mime = 'image/png';\nelse if (buf.subarray(0, 4).toString() === 'RIFF' && buf.subarray(8, 12).toString() === 'WEBP') mime = 'image/webp';\nconst image_url = `data:${mime};base64,${buf.toString('base64')}`;\n\nconst model = String($env.FAL_MODEL);\nconst dur = Number(o.duration || 5);\nconst body = { prompt: o.prompt, image_url };\nif (/kling/i.test(model)) {\n  body.duration = dur >= 10 ? '10' : '5';\n  if (o.negative_prompt) body.negative_prompt = o.negative_prompt;\n  body.cfg_scale = 0.5;\n} else if (/hailuo/i.test(model)) {\n  body.duration = dur >= 10 ? '10' : '6';   // Hailuo: 6 yoki 10\n  body.prompt_optimizer = false;            // shablon prompti o'zgarmasin\n} else {\n  body.duration = String(dur);\n  if (o.negative_prompt) body.negative_prompt = o.negative_prompt;\n}\nconst hook = String($env.WEBHOOK_URL).replace(/\\/+$/, '') + '/webhook/fal-result?secret=' +\n  encodeURIComponent($env.FAL_WEBHOOK_SECRET || '');\nreturn [{ json: {\n  order_id: o.id,\n  url: 'https://queue.fal.run/' + model + '?fal_webhook=' + encodeURIComponent(hook),\n  body,\n} }];\n"
+      },
+      "id": "094f5549-7e7b-5557-b6c1-fa284500ee93",
+      "name": "Build fal request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.url }}",
+        "options": {
+          "timeout": 60000
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Key ' + $env.FAL_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.body) }}"
+      },
+      "id": "21b2cc86-b15a-5b4d-aa85-a93cfebc8e4c",
+      "name": "fal submit",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1760,
+        200
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE orders SET fal_request_id = $2, status_url = $3, response_url = $4\nWHERE id = $1 AND status = 'generating'",
+        "options": {
+          "queryReplacement": "={{ [ $('Decide').first().json.id, $json.request_id, $json.status_url, $json.response_url ] }}"
+        }
+      },
+      "id": "fab96390-af22-529e-b2a2-e5d99bbddc99",
+      "name": "Save request",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1980,
+        120
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-postgres",
+          "name": "Supabase Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE orders SET error_text = $2 WHERE id = $1",
+        "options": {
+          "queryReplacement": "={{ [ $('Decide').first().json.id, ('submit: ' + JSON.stringify($json.error || $json)).slice(0, 1000) ] }}"
+        }
+      },
+      "id": "1eb63a48-3d16-5ac1-9d3e-4bcf8327e52c",
+      "name": "Save submit error",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1980,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-postgres",
+          "name": "Supabase Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH f AS (\n  UPDATE orders SET status = 'failed', error_text = $3, failed_at = now()\n  WHERE id = $1 AND status = 'generating' AND attempt = $2\n  RETURNING id, user_id, template_id, attempt\n)\nSELECT f.*, u.username FROM f JOIN users u ON u.telegram_id = f.user_id",
+        "options": {
+          "queryReplacement": "={{ [ $json.id, $json.attempt, $json.error ] }}"
+        }
+      },
+      "id": "8cb76001-8cf4-551f-a171-9fb076551155",
+      "name": "Mark failed",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        880,
+        480
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-postgres",
+          "name": "Supabase Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const o = $('Decide').first().json;\nconst T = o.texts || {};\n\nconst t = (k, v = {}) => String(T[k] ?? k).replace(/\\{(\\w+)\\}/g, (m, x) => (v[x] ?? m));\nconst esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\n\nconst r = $input.first().json;\nif (!r.id) return [];\nconst user = (r.username ? '@' + r.username + ' ' : '') + r.user_id;\nreturn [\n  { json: { method: 'sendMessage', payload: {\n    chat_id: r.user_id, text: t('err_generation'), parse_mode: 'HTML',\n    reply_markup: { inline_keyboard: [[{ text: t('btn_new'), callback_data: 'new' }]] },\n  } } },\n  { json: { method: 'sendMessage', payload: {\n    chat_id: $env.ADMIN_CHAT_ID, parse_mode: 'HTML',\n    text: t('admin_failed', { order_id: r.id, user: esc(user), template: esc(r.template_id), attempt: r.attempt, error: esc(String(o.error).slice(0, 500)) }),\n  } } },\n];\n"
+      },
+      "id": "df1bb517-0db6-5331-a312-46ec70024af7",
+      "name": "Build fail messages",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://api.telegram.org/bot' + $env.TELEGRAM_BOT_TOKEN + '/' + $json.method }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          },
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 100
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.payload) }}"
+      },
+      "id": "47d9f112-c25c-5614-91d3-32bc69d17fcc",
+      "name": "Send TG",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1320,
+        480
+      ]
+    }
+  ],
+  "connections": {
+    "Start": {
+      "main": [
+        [
+          {
+            "node": "Load order",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load order": {
+      "main": [
+        [
+          {
+            "node": "Decide",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decide": {
+      "main": [
+        [
+          {
+            "node": "Action",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Action": {
+      "main": [
+        [
+          {
+            "node": "Start attempt",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Start attempt": {
+      "main": [
+        [
+          {
+            "node": "TG getFile",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "TG getFile": {
+      "main": [
+        [
+          {
+            "node": "TG download",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "TG download": {
+      "main": [
+        [
+          {
+            "node": "Build fal request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build fal request": {
+      "main": [
+        [
+          {
+            "node": "fal submit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "fal submit": {
+      "main": [
+        [
+          {
+            "node": "Save request",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Save submit error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark failed": {
+      "main": [
+        [
+          {
+            "node": "Build fail messages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build fail messages": {
+      "main": [
+        [
+          {
+            "node": "Send TG",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true
+  },
+  "pinData": {},
+  "active": false,
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}
