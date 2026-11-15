@@ -1,98 +1,24 @@
-# 🎵 Shazam Telegram Bot
+# 🎬 Rasmdan video — Telegram bot (n8n + fal.ai)
 
-YouTube, Instagram va TikTok videolaridagi musiqani avtomatik aniqlab, videoni yuklab beruvchi bot.
+Foydalanuvchi mashina yoki portret rasmini yuboradi, 20 000 so'm to'laydi va tayyor shablon bo'yicha
+5–6 soniyalik AI video oladi. Hammasi n8n'da avtomatik.
 
-## ⚡ Imkoniyatlar
-
-- 🎵 Shazam orqali musiqa aniqlash (qo'shiq nomi, artist, album)
-- 📥 YouTube, Instagram Reels, TikTok videolarini yuklab olish
-- 📤 Videoni to'g'ridan-to'g'ri Telegram ga yuborish
-- 🚀 Async arxitektura (tez ishlaydi)
-
-## 🛠 O'rnatish
-
-### 1. Talablar
-- Python 3.11+
-- ffmpeg
-- Telegram Bot Token (@BotFather)
-
-### 2. Klonlash
-```bash
-git clone https://github.com/YOUR_USERNAME/shazam-bot.git
-cd shazam-bot
-```
-
-### 3. Virtual muhit
-```bash
-python -m venv venv
-source venv/bin/activate  # Linux/Mac
-venv\Scripts\activate     # Windows
-```
-
-### 4. Kutubxonalarni o'rnatish
-```bash
-pip install -r requirements.txt
-```
-
-### 5. .env fayl yaratish
-```bash
-cp .env.example .env
-# .env faylni tahrirlang va BOT_TOKEN ni qo'shing
-```
-
-### 6. ffmpeg o'rnatish
-```bash
-# Ubuntu/Debian
-sudo apt install ffmpeg
-
-# MacOS
-brew install ffmpeg
-
-# Windows - https://ffmpeg.org/download.html
-```
-
-### 7. Ishga tushirish
-```bash
-python bot.py
-```
-
-## 🐳 Docker bilan
-
-```bash
-cp .env.example .env
-# BOT_TOKEN ni .env ga qo'shing
-
-docker-compose up -d
-```
-
-## 📁 Loyiha tuzilmasi
+## Tuzilma
 
 ```
-shazam_bot/
-├── bot.py              # Asosiy bot fayli
-├── downloader.py       # yt-dlp video/audio yuklab olish
-├── shazam_finder.py    # ShazamIO musiqa aniqlash
-├── utils.py            # Yordamchi funksiyalar
-├── requirements.txt    # Python kutubxonalari
-├── Dockerfile
-├── docker-compose.yml
-└── .env.example
+docs/        bosqichlar bo'yicha hujjatlar
+config/      shablonlar (templates.json), bot matnlari
+workflows/   n8n workflow JSON eksportlari
+.env.example barcha o'zgaruvchilar
 ```
 
-## ⚠️ Muhim eslatmalar
+## Bosqichlar
 
-- **Instagram**: Private postlar uchun `cookies.txt` kerak bo'lishi mumkin
-- **Fayl hajmi**: Telegram 50MB gacha video qabul qiladi
-- **TikTok**: Ba'zan VPN kerak bo'lishi mumkin
-
-## 📝 Instagram Cookies (ixtiyoriy)
-
-Private Instagram reels uchun:
-1. Chrome extension: "Get cookies.txt LOCALLY" o'rnating
-2. instagram.com ga kiring
-3. Cookies ni eksport qiling → `cookies.txt` sifatida saqlang
-4. Bot papkasiga qo'ying
-
-## 🤝 Hissa qo'shish
-
-Pull request lar qabul qilinadi!
+| # | Bosqich | Holat |
+|---|---------|-------|
+| 1 | MVP: bot + mashina + 2 shablon + fal.ai ([docs/01-mvp-workflow.md](docs/01-mvp-workflow.md)) | 🟡 dizayn tayyor |
+| 2 | Shablon sinovi (20–30 rasm) | ⏳ |
+| 3 | To'lov: Click / Payme | ⏳ |
+| 4 | Baza, admin, `/stats`, `/broadcast` | ⏳ |
+| 5 | Portret + moderatsiya + rozilik | ⏳ |
+| 6 | Ishga tushirish | ⏳ |

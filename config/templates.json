@@ -1,0 +1,65 @@
+{
+  "default_negative_prompt": "distorted face, extra limbs, warped car body, changed logo, text, watermark, blurry, flicker",
+  "templates": [
+    {
+      "id": "car_night_city",
+      "category": "car",
+      "name_uz": "🌃 Night City",
+      "prompt": "Cinematic shot of this exact car driving slowly through a neon-lit city street at night, wet asphalt reflections, smooth camera tracking from the side, realistic lighting, keep the car's design, color and wheels unchanged.",
+      "negative_prompt": null,
+      "duration": 5,
+      "active": true,
+      "sample_file_id": null
+    },
+    {
+      "id": "car_orbit",
+      "category": "car",
+      "name_uz": "🔄 360° aylanish",
+      "prompt": "Smooth slow orbit camera move around this exact car parked in a premium studio with soft light, glossy reflections, car stays still, design and color unchanged.",
+      "negative_prompt": null,
+      "duration": 5,
+      "active": true,
+      "sample_file_id": null
+    },
+    {
+      "id": "car_desert",
+      "category": "car",
+      "name_uz": "🏜 Cho'l",
+      "prompt": "This exact car driving fast along a desert road at golden hour, dust trail behind the wheels, low-angle tracking camera, cinematic, car design unchanged.",
+      "negative_prompt": null,
+      "duration": 5,
+      "active": false,
+      "sample_file_id": null
+    },
+    {
+      "id": "car_rain",
+      "category": "car",
+      "name_uz": "🌧 Yomg'ir",
+      "prompt": "This exact car parked under heavy rain at night, headlights turn on, raindrops on the body, slow push-in camera, moody cinematic lighting.",
+      "negative_prompt": null,
+      "duration": 5,
+      "active": false,
+      "sample_file_id": null
+    },
+    {
+      "id": "portrait_cinematic",
+      "category": "portrait",
+      "name_uz": "🎬 Kino kadri",
+      "prompt": "The person slowly turns their head toward the camera and smiles softly, gentle wind in the hair, cinematic shallow depth of field, natural face, identity unchanged.",
+      "negative_prompt": null,
+      "duration": 5,
+      "active": false,
+      "sample_file_id": null
+    },
+    {
+      "id": "portrait_golden",
+      "category": "portrait",
+      "name_uz": "🌅 Oltin soat",
+      "prompt": "The person stands in warm golden-hour sunlight, light breeze, slow camera push-in, calm natural expression, identity unchanged.",
+      "negative_prompt": null,
+      "duration": 5,
+      "active": false,
+      "sample_file_id": null
+    }
+  ]
+}
