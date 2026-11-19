@@ -1,7 +1,8 @@
 name: Claude
 
 # Issue yoki PR'da "@claude ..." deb yozing — Claude kodni o'zgartirib PR ochadi.
-# Kerak: repoda ANTHROPIC_API_KEY secret va Claude GitHub App o'rnatilgan bo'lishi.
+# Kerak (bittasi yetarli): CLAUDE_CODE_OAUTH_TOKEN (Claude obunasi, `claude setup-token`) yoki ANTHROPIC_API_KEY,
+# va Claude GitHub App o'rnatilgan bo'lishi.
 on:
   issue_comment:
     types: [created]
@@ -27,4 +28,5 @@ jobs:
       - uses: actions/checkout@v4
       - uses: anthropics/claude-code-action@v1
         with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
