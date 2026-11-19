@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+venv/
+.venv/
+.env
+cookies.txt
+*.session
+downloads/
+tmp/
+.DS_Store
